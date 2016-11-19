@@ -17,17 +17,20 @@ import cairo
 MAX_WIDTH = 600
 MAX_LENGTH = 140
 CFGFILE = 'mytwitter.json'
-AUTH_FILE="tokens.info"
-API_KEY="S4yiHBJiOE0C7T4nuOQuitkGY",
-API_SECRET="vEtZxALxvvteNMlNYd3dfOhvH5ZDtOlryHLhNONz0GdrNLIRrH"
+AUTHFILE="tokens.info"
+APIKEYFILE="apikeys.info"
 
 class Mytweetplugin:
+    """ My tweet plugin
+    To post a tweet with current canvas image directly,
+    without save it.
+    """
 
-    def __init__(self, base_dir):
+    def __init__(self):
         self._grid_base = None
         self._pixbuf = None
-        self._base_dir = base_dir
-        cfg_file = os.path.join(base_dir, CFGFILE)
+        self._base_dir = os.path.dirname(__file__)
+        cfg_file = os.path.join(self._base_dir, CFGFILE)
         if os.path.exists(cfg_file):
             with open(cfg_file, 'r') as ifp:
                 self.conf = json.load(ifp)
@@ -120,6 +123,7 @@ class Mytweetplugin:
         """ Caution: all texts once convert into UCS-2
         """
         tag_src = self._entry_tags.get_text().decode('utf-8')
+        tags = None
         if tag_src != "":
             tags = [ "#%s" % x for x in tag_src.split()]
 
@@ -127,13 +131,14 @@ class Mytweetplugin:
         start = buf.get_iter_at_offset(0)
         end = buf.get_iter_at_offset(-1)
         tweet_msg = buf.get_text(start, end, False).decode('utf-8')
-        for cur_tag in tags:
-            tweet_msg += " "
-            tweet_msg += cur_tag
+        if tags:
+            for cur_tag in tags:
+                tweet_msg += " "
+                tweet_msg += cur_tag
         if len(tweet_msg) > MAX_LENGTH:
             self.show_message("ERROR: Your tweet is %s letters.\n exceeds max %d letters so cannot send." % (len(tweet_msg),MAX_LENGTH))
         else:
-            self.tweet(tweet_msg)
+            self.tweet(tweet_msg, [self._pixbuf, ])
             self.end()
 
     def cancel_clicked_cb(self, widget):
@@ -144,45 +149,87 @@ class Mytweetplugin:
         """ Activate handler,
         """
         self.app = app
-        self.run()
-        return None
-
+        root = model.layer_stack
+        if model.get_frame_enabled():
+            bbox = model.get_frame()
+        else:
+            bbox = root.get_bbox()
+        pixbuf = root.render_as_pixbuf(*bbox, alpha=False)
+        self.run(pixbuf) 
+        return None # returning None = DO NOT ENTER dragging mode.
 
     def tweet(self, msg, pixbuf_list):
         try:
-           #from twython import Twython
-            from Dummytwython import Twython
+            if hasattr(self, 'app'):
+                from twython import Twython
+               #from Dummytwython import Twython
+                self.Twython = Twython
+            else:
+                # for 
+                from Dummytwython import Twython
+                global AUTHFILE
+                AUTHFILE="tokens2.info"
+                self.Twython = Twython
+                print('*** DRY-RUN TEST initiated ***')
             auth_file = os.path.join(self._base_dir, AUTHFILE)
+            # Load Authenticate infomation file
             with open(auth_file, 'r') as ifp:
                 auth = json.load(ifp)
+                self.auth = auth
                 OAUTH_TOKEN = auth['oauth_token']
                 OAUTH_TOKEN_SECRET = auth['oauth_token_secret']
-            tw = Twython(API_KEY, API_SECRET,
-                         OAUTH_TOKEN, OAUTH_TOKEN_SECRET)
+            # Load API Key infomation file
+            key_file = os.path.join(self._base_dir, APIKEYFILE)
+            if os.path.exists(key_file):
+                with open(key_file, 'r') as ifp:
+                    auth = json.load(ifp)
+                    self.auth = auth
+                    API_KEY = auth['API_KEY']
+                    API_SECRET= auth['API_SECRET']
+                tw = self.Twython(API_KEY, API_SECRET,
+                             OAUTH_TOKEN, OAUTH_TOKEN_SECRET)
+            else:
+                self.show_message("You need your API key(API_KEY) and API secret(API_SECRET) as json file %s" % key_file)
+                self.end()
         except IOError as e:
-           #self.show_message("There is no authentication file.\n you might need to get PIN code.proceed?")
+            # Authenticate file does not exist.
+            # so Request PIN Codes.
             self.ask_auth()
         except ImportError as e:
             self.show_message("ERROR: cannot import Twython. Tweet failed.")
         except Exception as e:
             self.show_message(str(e))
         else:
+            from PIL import Image
+            from StringIO import StringIO
+            def convert_image(pixbuf):
+                width,height = pixbuf.get_width(),pixbuf.get_height()
+                photo = Image.frombytes("RGB",(width,height),pixbuf.get_pixels() )
+
+                if width > MAX_WIDTH:
+                    wpercent = (MAX_WIDTH / float(width))
+                    height = int(height * float(wpercent))
+                    if hasattr(Image,'LANCZOS'):
+                        filter=Image.LANCZOS
+                    else:
+                        filter=Image.CUBIC
+                    photo = photo.resize((MAX_WIDTH, height), 
+                            filter)
+
+                image_io = StringIO()
+                photo.save(image_io, format='JPEG', 
+                        quality=90, optimize=True)
+
+                image_io.seek(0)
+                return image_io
+
             media_ids = []
-            if media_file:
-                if type(media_file) == str:
-                    media_file = [media_file, ]
-                for cm in pixbuf_list:
-                   #if os.path.exists(cm):
-                   #    pic_fp = open(cm, 'rb')
-                   #    response = tw.upload_media(media = pic_fp)
-                   #    media_ids.append(response['media_id'])
-                   #    print('media %s has uploadded.wait for next media...' % cm)
-                   #    time.sleep(1)
-                   #else:
-                   #    print('[ERROR] media %s does not exist!!' % cm)
-                    response = tw.upload_media(media = pic_fp)
-                    media_ids.append(response['media_id'])
-                    time.sleep(1)
+            for cm in pixbuf_list:
+                pic_io = convert_image(cm)
+                response = tw.upload_media(media = pic_io)
+                media_ids.append(response['media_id'])
+                del pic_io
+                time.sleep(1)
 
             tw.update_status(status = msg, media_ids = media_ids)
 
@@ -198,11 +245,11 @@ class Mytweetplugin:
     def ask_auth(self):
         self._dialog_ask.run()
 
-    def button_ask_yes_cb(self, widget):
+    def button_ask_yes_clicked_cb(self, widget):
         self.run_pincode()
         self._dialog_ask.close()
 
-    def button_ask_no_cb(self, widget):
+    def button_ask_no_clicked_cb(self, widget):
         self._dialog_ask.close()
 
     ## PINCode dialog related
@@ -215,48 +262,34 @@ class Mytweetplugin:
         self._dialog_pincode.set_size_request(600, 300)
 
     def run_pincode(self):
-        tw = Twython(API_KEY, API_SECRET)
+        tw = self.Twython(API_KEY, API_SECRET)
         self.auth = tw.get_authentication_tokens()
 
-        self._entry_url = self.auth['auth_url']
+        self._entry_url.set_text(self.auth['auth_url'])
         self._dialog_pincode.run()
 
-    def button_pincode_ok_cb(self, widget):
+    def button_pincode_ok_clicked_cb(self, widget):
         pin_code = self._entry_pincode.get_text().strip()
         if pin_code != "":
-            tw = Twython(API_KEY, API_SECRET,
+            auth = self.auth
+            tw = self.Twython(API_KEY, API_SECRET,
                     auth['oauth_token'], auth['oauth_token_secret'])
             final = tw.get_authorized_tokens(pin_code)
-            auth_file = os.path.join(self._base_dir, AUTHFILE)
-            with open(auth_file, 'w') as ofp:
-                json.dump(final, ofp)
-            self.show_message("Authenticate completed. Please retry tweet.")
-            self._dialog_pincode.close()
+            if 'oauth_token' in final and 'oauth_token_secret' in final:
+                auth_file = os.path.join(self._base_dir, AUTHFILE)
+                with open(auth_file, 'w') as ofp:
+                    json.dump(final, ofp)
+                self.auth = final
+                self.show_message("Authenticate completed. Please retry tweet.")
+                self._dialog_pincode.close()
+            else:
+                self.show_message("Authenticate failed. PIN code might be wrong.Please confirm it and retry.")
+
         else:
             self.show_message("You need to get PIN code from the URL and paste it for authentication.")
     
-    def button_pincode_cancel_cb(self, widget):
+    def button_pincode_cancel_clicked_cb(self, widget):
         self._dialog_pincode.close()
-
-   #def get_token(self):
-   #    tw = Twython(API_KEY, API_SECRET)
-   #    auth = tw.get_authentication_tokens()
-   #    print("----------------------------------------")
-   #    print("Now, you must open the url")
-   #    print(auth['auth_url'])
-   #    print("and get PIN code, then input that code here:")
-   #    pin_code = raw_input("PIN code? : ")
-   #    # IMPORTANT: Re-generate twtter instance with
-   #    # returned temporary auth information
-   #    tw = Twython(API_KEY, API_SECRET,
-   #            auth['oauth_token'], auth['oauth_token_secret'])
-   #    final = tw.get_authorized_tokens(pin_code)
-   #   #print(final)
-   #    auth_file = os.path.join(self._base_dir, AUTHFILE)
-   #    with open(auth_file, 'w') as ofp:
-   #        json.dump(final, ofp)
-   #    self.show_message("**** COMPLETED - then, restart oneshottw - ****")
-
 
 def register(app):
     """ Called from mypaint at initialize,
@@ -269,14 +302,12 @@ def register(app):
                  plugin instance)
     :rtype tuple:
     """
-    plugin_dir = os.path.join(app.state_dirs.user_data, 'plugins')
-   #pixbuf = GdkPixbuf.Pixbuf.new_from_file(os.path.join(plugin_dir, 'test.jpg'))
-    return ("Twitter post", None, Mytweetplugin(plugin_dir))
+    return ("Twitter post", None, Mytweetplugin())
 
 if __name__ == '__main__':
 
     pixbuf = GdkPixbuf.Pixbuf.new_from_file('test.jpg')
-    t = Mytweetplugin("")
+    t = Mytweetplugin()
     t.run(pixbuf)
     pass
 

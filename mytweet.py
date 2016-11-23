@@ -83,7 +83,7 @@ class Mytweetplugin:
         self.write_conf('dialog.width', w)
         self.write_conf('dialog.height', h)
         if self._written:
-            cfg_file = os.path.join(base_dir, CFGFILE)
+            cfg_file = os.path.join(self._base_dir, CFGFILE)
             with open(cfg_file, 'w') as ofp:
                 json.dump(self.conf, ofp)
 
@@ -204,7 +204,7 @@ class Mytweetplugin:
             from StringIO import StringIO
             def convert_image(pixbuf):
                 width,height = pixbuf.get_width(),pixbuf.get_height()
-                photo = Image.frombytes("RGB",(width,height),pixbuf.get_pixels() )
+                photo = Image.frombytes("RGBA",(width,height),pixbuf.get_pixels() )
 
                 if width > MAX_WIDTH:
                     wpercent = (MAX_WIDTH / float(width))
@@ -230,9 +230,9 @@ class Mytweetplugin:
                 media_ids.append(response['media_id'])
                 del pic_io
                 time.sleep(1)
-
+            
             tw.update_status(status = msg, media_ids = media_ids)
-
+            self.app.show_transient_message("Successfully tweet the message")
 
     def show_message(self, msg):
         if hasattr(self, "app"):

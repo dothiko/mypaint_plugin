@@ -67,6 +67,7 @@ class Mytweetplugin:
         self._grid_base = builder.get_object("base_grid")
         self._pane = builder.get_object("paned_view")
         self._area_preview = builder.get_object("area_preview")
+        self._spinner = builder.get_object("tweet_spinner")
 
         # Setting Textview/buffer
         view = builder.get_object("textview_tweet")
@@ -193,6 +194,8 @@ class Mytweetplugin:
         return None # returning None = DO NOT ENTER dragging mode.
 
     def tweet(self, msg, pixbuf_list):
+        self._spinner.start()
+        self.flush_gtk_events()
         try:
            #if hasattr(self, 'app') and self.app != None:
             if not self.is_dry_run:
@@ -239,9 +242,9 @@ class Mytweetplugin:
             from StringIO import StringIO
             def convert_image(pixbuf):
                 width,height = pixbuf.get_width(),pixbuf.get_height()
-                print('---start---')
-                print((width,height))
-                print(pixbuf.get_rowstride())
+               #print('---start---')
+               #print((width,height))
+               #print(pixbuf.get_rowstride())
 
                 if pixbuf.get_has_alpha():
                     channel_cnt = 4
@@ -298,6 +301,7 @@ class Mytweetplugin:
                 time.sleep(1)
             
             tw.update_status(status = msg, media_ids = media_ids)
+            self._spinner.stop()
             self.show_message("Successfully tweet the message")
 
     def show_message(self, msg):
@@ -305,6 +309,10 @@ class Mytweetplugin:
             self.app.message_dialog(msg)
         else:
             print(msg)
+
+    def flush_gtk_events(self):
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(True)
 
     ## Asking dialog related
 

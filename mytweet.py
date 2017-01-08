@@ -25,6 +25,9 @@ class Mytweetplugin:
     To post a tweet with current canvas image directly,
     without save it into filesystem.
 
+    NEEDED MODULES:
+        Python-Imaging (a.k.a PIL)
+
     HOW TO DRY-RUN:
         
         you can test this plugin with dry-run state, which means
@@ -39,7 +42,6 @@ class Mytweetplugin:
     ## class constants
 
     MAX_TWITTER_COUNT = 140
-
 
     def __init__(self):
         self._grid_base = None
@@ -89,6 +91,10 @@ class Mytweetplugin:
         self._setup_dialog_pincode(builder)
 
         self._updating_ui = False
+
+    @property
+    def is_dry_run(self):
+        return not hasattr(self, 'app') or self.app == None
     
     def run(self, pixbuf):
         self._pixbuf = pixbuf
@@ -174,18 +180,22 @@ class Mytweetplugin:
         """ Activate handler,
         """
         self.app = app
+
         root = model.layer_stack
         if model.get_frame_enabled():
             bbox = model.get_frame()
         else:
             bbox = root.get_bbox()
+
         pixbuf = root.render_as_pixbuf(*bbox, alpha=False)
+
         self.run(pixbuf) 
         return None # returning None = DO NOT ENTER dragging mode.
 
     def tweet(self, msg, pixbuf_list):
         try:
-            if hasattr(self, 'app') and self.app != None:
+           #if hasattr(self, 'app') and self.app != None:
+            if not self.is_dry_run:
                 from twython import Twython
                #from Dummytwython import Twython
                 self.Twython = Twython
@@ -229,7 +239,28 @@ class Mytweetplugin:
             from StringIO import StringIO
             def convert_image(pixbuf):
                 width,height = pixbuf.get_width(),pixbuf.get_height()
-                photo = Image.frombytes("RGBA",(width,height),pixbuf.get_pixels() )
+                print('---start---')
+                print((width,height))
+                print(pixbuf.get_rowstride())
+
+                if pixbuf.get_has_alpha():
+                    channel_cnt = 4
+                    channel_str = "RGBA"
+                else:
+                    channel_cnt = 3
+                    channel_str = "RGB"
+
+                if pixbuf.get_rowstride() > width * channel_cnt: 
+                    # Workaround for rowstride related glitches.
+                    p = ''
+                    i = 0
+                    pixels = pixbuf.get_pixels()
+                    for y in xrange(height):
+                        p += pixels[i:i + width * channel_cnt]
+                        i += pixbuf.get_rowstride()
+                    outimg = Image.frombytes(channel_str,(width, height), p)
+                else:
+                    outimg = Image.frombytes(channel_str,(width,height),pixbuf.get_pixels() )
 
                 if width > MAX_WIDTH:
                     wpercent = (MAX_WIDTH / float(width))
@@ -238,14 +269,24 @@ class Mytweetplugin:
                         filter=Image.LANCZOS
                     else:
                         filter=Image.CUBIC
-                    photo = photo.resize((MAX_WIDTH, height), 
+                    outimg = outimg.resize((MAX_WIDTH, height), 
                             filter)
 
                 image_io = StringIO()
-                photo.save(image_io, format='JPEG', 
+                outimg.save(image_io, format='JPEG', 
                         quality=90, optimize=True)
-
                 image_io.seek(0)
+
+                # XXX Testing codes, for dry-run
+                if self.is_dry_run:
+                    if not hasattr(self, 'dry_run_idx'):
+                        self.dry_run_idx = 0
+                    else:
+                        self.dry_run_idx += 1
+                    idx = self.dry_run_idx
+                    outimg.save('/tmp/dryrun_converted-%d.jpg' % idx, format='JPEG', 
+                            quality=90, optimize=True)
+
                 return image_io
 
             media_ids = []
@@ -257,7 +298,7 @@ class Mytweetplugin:
                 time.sleep(1)
             
             tw.update_status(status = msg, media_ids = media_ids)
-            self.app.show_transient_message("Successfully tweet the message")
+            self.show_message("Successfully tweet the message")
 
     def show_message(self, msg):
         if hasattr(self, "app"):
@@ -338,7 +379,7 @@ def register(app):
 
 if __name__ == '__main__':
 
-    pixbuf = GdkPixbuf.Pixbuf.new_from_file('test.jpg')
+    pixbuf = GdkPixbuf.Pixbuf.new_from_file('test_odd.jpg')
     t = Mytweetplugin()
     t.run(pixbuf)
     pass

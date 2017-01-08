@@ -23,8 +23,23 @@ APIKEYFILE="apikeys.info"
 class Mytweetplugin:
     """ My tweet plugin
     To post a tweet with current canvas image directly,
-    without save it.
+    without save it into filesystem.
+
+    HOW TO DRY-RUN:
+        
+        you can test this plugin with dry-run state, which means
+        actually does not update status(post tweet).
+
+        it is simple, to set self.app attribute as None
+        before self.tweet() method is called.
+        or completely remove self.app attribute.
+
     """
+
+    ## class constants
+
+    MAX_TWITTER_COUNT = 140
+
 
     def __init__(self):
         self._grid_base = None
@@ -50,7 +65,17 @@ class Mytweetplugin:
         self._grid_base = builder.get_object("base_grid")
         self._pane = builder.get_object("paned_view")
         self._area_preview = builder.get_object("area_preview")
-        self._textview_tweet = builder.get_object("textview_tweet")
+
+        # Setting Textview/buffer
+        view = builder.get_object("textview_tweet")
+        buf = view.get_buffer()
+        self._warn_tag = buf.create_tag(tag_name = "exceed_warning", background="red")
+        buf.connect("changed", self.textbuffer_changed_cb)
+
+        self._textview_tweet = view
+
+
+
         self._entry_tags = builder.get_object("entry_tags")
         dlg = builder.get_object("mytweet_dialog")
 
@@ -160,7 +185,7 @@ class Mytweetplugin:
 
     def tweet(self, msg, pixbuf_list):
         try:
-            if hasattr(self, 'app'):
+            if hasattr(self, 'app') and self.app != None:
                 from twython import Twython
                #from Dummytwython import Twython
                 self.Twython = Twython
@@ -251,6 +276,13 @@ class Mytweetplugin:
 
     def button_ask_no_clicked_cb(self, widget):
         self._dialog_ask.close()
+
+    def textbuffer_changed_cb(self, buf):  
+        if buf.get_char_count() > self.MAX_TWITTER_COUNT:
+            start_iter = buf.get_iter_at_offset(self.MAX_TWITTER_COUNT)
+            end_iter = buf.get_iter_at_offset(buf.get_char_count())
+            buf.apply_tag(self._warn_tag, start_iter, end_iter)
+            pass
 
     ## PINCode dialog related
 
